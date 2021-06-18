@@ -1,0 +1,12 @@
+html,
+#nav-bar,
+#PersonalToolbar,
+#TabsToolbar,
+#urlbar-container,
+#search-container {
+    min-width: 0 !important;
+}
+
+#forward-button {
+    display: none !important;
+}
