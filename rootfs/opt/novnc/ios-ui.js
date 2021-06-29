@@ -1,3 +1,6 @@
+const apiPort = '5801';
+const apiServer =
+    `${document.location.protocol}//${document.location.hostname}:${apiPort}`;
 
 const addButton = (icon, cssClass, target, callback) => {
   const opener = document.createElement('div');
@@ -12,12 +15,12 @@ const addButton = (icon, cssClass, target, callback) => {
   target.appendChild(button);
 };
 
-const addStylesheet = (css) => {
-  const style = document.createElement('style');
-  style.innerHTML = css;
-  document.head.appendChild(style);
-};
-
+/*
+ * When in split-screen mode, T=the iPad returns the size of the whole screen
+ * rather than the size of the split-screen'd app. We can get the size of the
+ * `documentElement` instead, which is accurate for all devices in all
+ * orientations.
+ */
 const getScreenSize = () => {
   const rect = document.documentElement.getBoundingClientRect();
   return [rect.width, rect.height];
@@ -32,13 +35,91 @@ const fitToScreen = () => {
   [w, h] = getScreenSize();
   h = h - 51;
   const xhr = new XMLHttpRequest();
-  xhr.open('GET', `/?resize=${w},${h}&cachebuster=${rand()}`);
-  xhr.timeout = 1000;
+  xhr.open('GET',
+      `${apiServer}/set-display-size/?w=${w}&h=${h}&cachebuster=${rand()}`);
+  xhr.onreadystatechange = function() {
+    if (this.readyState === 4) {
+      const response = JSON.parse(this.response);
+      if (this.status === 200) {
+        document.location.reload();
+      } else {
+        alert(response.message);
+      }
+    }
+  }
   xhr.send();
-  self.setTimeout(() => {
-    document.location.reload();
-  }, 3000);
 };
+
+const showMenu = () => {
+  const xhr = new XMLHttpRequest();
+  xhr.open('GET', `${apiServer}/get-user-agents/?cachebuster=${rand()}`);
+  xhr.onreadystatechange = function() {
+    if (this.readyState === 4) {
+      const response = JSON.parse(this.response);
+      if (this.status === 200) {
+        const userAgents = response.message.userAgents;
+        const activeUserAgent = response.message.active;
+        const userAgentSelect = document.getElementById('user-agent-select');
+        userAgentSelect.innerHTML = '';
+        userAgents.forEach((userAgent, i) => {
+          const userAgentOption = document.createElement('option');
+          userAgentOption.value = userAgent.id;
+          userAgentOption.innerText = userAgent.name;
+          userAgentSelect.appendChild(userAgentOption);
+          if (userAgent.id == activeUserAgent) {
+            userAgentSelect.value = activeUserAgent;
+            window.activeUserAgent = activeUserAgent;
+          }
+        });
+        $('#menuModal').modal('show');
+      } else {
+        alert(response.message);
+      }
+    }
+  }
+  xhr.send();
+};
+
+// Bind buttons and inputs
+
+// User agent input
+const userAgentSelect = document.getElementById('user-agent-select');
+if (userAgentSelect) {
+  userAgentSelect.addEventListener('change', function() {
+    if (this.value) {
+      window.selectedUserAgent = this.value;
+    }
+  });
+}
+
+// Cancel options button
+const cancelOptionsButton = document.getElementById('cancel-options-button');
+if (cancelOptionsButton) {
+  cancelOptionsButton.addEventListener('click', function() {
+    $('#menuModal').modal('hide');
+  });
+}
+
+// Submit options button
+const submitOptionsButton = document.getElementById('submit-options-button');
+if (submitOptionsButton) {
+  submitOptionsButton.addEventListener('click', function() {
+
+    // Set user agent
+    if (typeof window.selectedUserAgent !== 'undefined' ) {
+      if (typeof window.activeUserAgent === 'undefined' ||
+          window.activeUserAgent != window.selectedUserAgent) {
+        const id = window.selectedUserAgent;
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET',
+            `${apiServer}/set-user-agent/?id=${id}&cachebuster=${rand()}`);
+        xhr.send();
+      }
+    }
+
+    $('#menuModal').modal('hide');
+  });
+}
 
 // Replace the navbar
 const navbar = document.querySelector('.navbar');
@@ -46,22 +127,44 @@ const iosNavbar = document.createElement('div');
 iosNavbar.id = 'ios-navbar';
 if (navbar) {
   navbar.appendChild(iosNavbar);
+
+  // Menu button
+  const menuButtonArea = document.createElement('div');
+  menuButtonArea.id = 'menu-button-area';
+  menuButtonArea.innerHTML =
+      '<i class="fa fa-ellipsis-v" aria-hidden="true"></i>';
+  iosNavbar.appendChild(menuButtonArea);
+  menuButtonArea.addEventListener('click', () => {
+    showMenu();
+  });
+
+  // Keyboard button
   addButton('fa-keyboard-o', '', iosNavbar, () => {
     document.getElementById('virtualKeyboardToggleButton').click();
   });
+
+  // Cliboard button
   addButton('fa-clipboard', '', iosNavbar, () => {;
     document.getElementById('clipboardModalButton').click();
   });
+
+  // Message indicator
   const messageArea = document.createElement('div');
   messageArea.classList.add('message-area');
   messageArea.innerHTML = '<span class="message"></span>';
   iosNavbar.appendChild(messageArea);
+
+  // Refresh button
   addButton('fa-refresh', 'right', iosNavbar, () => {
     document.location.reload();
   });
+
+  // Resize button
   addButton('fa-arrows-alt', 'right', iosNavbar, () => {
     fitToScreen();
   });
+
+  // Viewers indicator
   const viewersIndicatorArea = document.createElement('div');
   viewersIndicatorArea.id = 'viewers-indicator-area';
   viewersIndicatorArea.innerHTML =
@@ -73,7 +176,7 @@ if (navbar) {
 // Update viewers indicator
 window.viewersTimer = self.setInterval(() => {
   const xhr = new XMLHttpRequest();
-  xhr.open('GET', `/viewers?&cachebuster=${rand()}`);
+  xhr.open('GET', `${apiServer}/get-viewers/?cachebuster=${rand()}`);
   xhr.onreadystatechange = function() {
     if (this.readyState === 4) {
       const indicatorArea = document.getElementById('viewers-indicator-area');
@@ -82,8 +185,9 @@ window.viewersTimer = self.setInterval(() => {
       let color = '#ff2e2e';
       let count = '?'
       if (this.status === 200) {
-        if (this.response == parseInt(this.response)) {
-          count = parseInt(this.response);
+        const response = JSON.parse(this.response);
+        if (response.message == parseInt(response.message)) {
+          count = parseInt(response.message);
           if (count === 1) {
             color = '#16e6e4';
             indicatorArea.classList.remove('blink');
@@ -99,15 +203,16 @@ window.viewersTimer = self.setInterval(() => {
   xhr.send();
 }, 3000);
 
-// Update message area
+// Update message indicator
 window.viewersTimer = self.setInterval(() => {
   const xhr = new XMLHttpRequest();
-  xhr.open('GET', `/messages?&cachebuster=${rand()}`);
+  xhr.open('GET', `${apiServer}/get-messages/?cachebuster=${rand()}`);
   xhr.onreadystatechange = function() {
     if (this.readyState === 4 && this.status === 200) {
       if (this.response) {
+        const response = JSON.parse(this.response);
         const messageArea = document.querySelector('.message-area .message');
-        messageArea.innerText = this.response;
+        messageArea.innerText = response.message;
       }
     }
   }

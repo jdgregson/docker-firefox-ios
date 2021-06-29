@@ -1,3 +1,4 @@
+/* Remove the browser window minumum width */
 html,
 #nav-bar,
 #PersonalToolbar,
@@ -7,6 +8,7 @@ html,
     min-width: 0 !important;
 }
 
+/* Hide the forward button to free up room for the address bar */
 #forward-button {
     display: none !important;
 }

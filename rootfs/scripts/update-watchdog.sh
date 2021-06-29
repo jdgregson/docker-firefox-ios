@@ -11,7 +11,7 @@ while true; do
         if [ "$latest_app" != "$running" ]; then
             apk upgrade --available
             add-pkg firefox=$latest_package --force
-            echo "Close all tabs to update Firefox" > /opt/novnc/messages
+            echo "Close all tabs to update Firefox" > /data/ui_messages
         fi
     fi
 done

@@ -14,6 +14,13 @@ body > canvas#rfbScreen.center-block {
   margin-top: 0 !important;
 }
 
+input,
+select {
+  background-color: #07343e;
+  border: 1px solid #16e6e4;
+  border-radius: 5px;
+}
+
 .message-area {
 	display: inline-block;
 	position: absolute;
@@ -168,6 +175,14 @@ nav.navbar.navbar-default {
   line-height: 10px;
   font-size: 10px;
   color: #ff2e2e;
+}
+
+#menu-button-area {
+  position: fixed;
+  color: #16e6e4;
+  bottom: 7px;
+  left: 3px;
+  padding: 8px 7px 8px 15px;
 }
 
 .blink {

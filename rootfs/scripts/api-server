@@ -1,0 +1,212 @@
+#!/usr/bin/python3
+
+import http.server
+import http.client
+import socketserver
+from urllib.parse import urlparse
+from urllib.parse import parse_qs
+import json
+import os
+import subprocess
+import time
+#import code
+
+PORT = 5801
+UI_MESSAGES_FILE = "/data/ui_messages"
+CLEAR_MESSAGES_FILE = "/tmp/clear_ui_messages"
+DISPLAY_WIDTH_FILE = "/config/display_width"
+DISPLAY_HEIGHT_FILE = "/config/display_height"
+USER_AGENTS_FILE = "/opt/novnc/user-agents.json"
+USER_AGENT_FILE = "/config/profile/user-agent"
+FIREFOX_SETTINGS_FILE = "/config/profile/user.js"
+
+class RequestHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        self.extra_headers = []
+
+        # @security: Content Security Policy
+        # Disable all active content from the API.
+        self.extra_headers += [
+            ["Content-Security-Policy", "default-src 'none';"]
+        ]
+
+        # @security: CSRF Protection
+        # Only allow requests to this API if the `Origin` header is not sent
+        # (meaning the request was sent from the same origin) or if the host in
+        # the `Origin` header is the same as the host in the `Host` header.
+        origin = self.headers.get("origin")
+        if (origin):
+            origin_allowed = False
+            try:
+                origin_name = (urlparse(origin).netloc).split(":")[0]
+                host = self.headers.get("host")
+                host_name = host.split(":")[0]
+                if origin_name == host_name:
+                    origin_allowed = True
+                    self.extra_headers += [
+                        ["Access-Control-Allow-Origin", origin]
+                    ]
+            except:
+                pass
+            if not origin_allowed:
+                self.send(403, json.dumps({
+                    "status": "error",
+                    "message": "Origin not allowed"
+                }), "text/json")
+                return
+
+        request_path = self.path
+        query_params = parse_qs(urlparse(request_path).query)
+
+        # Handle "set-display-size" endpoint
+        if "/set-display-size" in request_path:
+            if ("w" in query_params and "h" in query_params):
+                try:
+                    w = int(query_params["w"][0])
+                    h = int(query_params["h"][0])
+                except:
+                    self.send_api_error("w or h invalid")
+                    return
+                if (w > 99 and w < 10000 and h > 99 and h < 10000):
+                    # Set display size and restart Xvfb
+                    with open(DISPLAY_WIDTH_FILE, "w") as f:
+                        f.write(str(w))
+                    with open(DISPLAY_HEIGHT_FILE, "w") as f:
+                        f.write(str(h))
+                    subprocess.call(["pkill", "-3", "Xvfb"],
+                        stdout=open(os.devnull, "w"), stderr=subprocess.STDOUT)
+
+                    # Check to see if Xvfb started again
+                    c = "ps | grep Xvfb | grep -v grep"
+                    xvfb_running = subprocess.getoutput(c)
+                    xvfb_running_checks = 1
+                    while not xvfb_running:
+                        if xvfb_running_checks > 20:
+                            self.send_api_error("Xvfb did not restart")
+                            return
+                        time.sleep(0.5)
+                        xvfb_running = subprocess.getoutput(c)
+                        xvfb_running_checks += 1
+
+                    # Send the success message
+                    self.send(200, json.dumps({
+                        "status": "success",
+                        "message": ""
+                    }), "text/json")
+                    return
+                else:
+                    self.send_api_error(
+                        "w and h must be integers between 100 and 9999")
+                    return
+            else:
+                self.send_api_error("Both w and h must be defined")
+                return
+
+        # Handle "get-viewers" endpoint
+        if "/get-viewers" in request_path:
+            c = 'netstat -tn | grep -e "\d 127\.0\.0\.1:5900" | grep EST | wc -l'
+            try:
+                viewers_count = subprocess.getoutput(c)
+            except:
+                self.send_api_error("There was an error while counting viewers")
+                return
+            self.send(200, json.dumps({
+                "status": "success",
+                "message": viewers_count
+            }), "text/json")
+            return
+
+        # Handle "get-messages" endpoint
+        if "/get-messages" in request_path:
+            messages = ""
+            if os.path.exists(UI_MESSAGES_FILE):
+                if os.path.exists(CLEAR_MESSAGES_FILE):
+                    with open(UI_MESSAGES_FILE, "w") as f:
+                        f.write("")
+                    os.remove(CLEAR_MESSAGES_FILE)
+                else:
+                    with open(UI_MESSAGES_FILE, "r") as f:
+                        messages = f.read()
+            self.send(200, json.dumps({
+                "status": "success",
+                "message": messages
+            }), "text/json")
+            return
+
+        # Handle "get-user-agents" endpoint
+        if "/get-user-agents" in request_path:
+            user_agents = ""
+            if os.path.exists(USER_AGENTS_FILE):
+                with open(USER_AGENTS_FILE, "r") as f:
+                    user_agents = json.load(f)
+            self.send(200, json.dumps({
+                "status": "success",
+                "message": user_agents
+            }), "text/json")
+            return
+
+        # Handle "set-user-agent" endpoint
+        if "/set-user-agent" in request_path:
+            if "id" in query_params:
+                user_agent_id = query_params["id"][0]
+                try:
+                    user_agent_id = int(user_agent_id)
+                except:
+                    self.send_api_error("Invalid user ID")
+                    return
+            else:
+                self.send_api_error("No user agent ID was specified")
+                return
+            try:
+                user_agents = []
+                if os.path.exists(USER_AGENTS_FILE):
+                    with open(USER_AGENTS_FILE, "r") as f:
+                        user_agents = json.load(f)
+                else:
+                    self.send_api_error("User agents file does not exist")
+                    return
+                user_agent_found = False
+                for user_agent in user_agents["userAgents"]:
+                    if user_agent["id"] == user_agent_id:
+                        user_agent_found = True
+                        user_agent_string = user_agent["userAgent"]
+                        break
+                if user_agent_found:
+                    user_agents["active"] = user_agent_id
+                    with open(USER_AGENTS_FILE, "w") as f:
+                        json.dump(user_agents, f, indent=2)
+                    with open(USER_AGENT_FILE, "w") as f:
+                        f.write(user_agent_string)
+                    with open(UI_MESSAGES_FILE, "w") as f:
+                        f.write("Close all tabs to change user agents")
+                    self.send(200, json.dumps({
+                        "status": "success",
+                        "message": "User agent has been set"
+                    }), "text/json")
+                    return
+                else:
+                    self.send_api_error("No user agent with the specified ID")
+                    return
+            except:
+                self.send_api_error("There was an error setting the user agent")
+                return
+
+        # Handle default response
+        self.send_api_error("Undefined request")
+
+    def send(self, response_code, data, content_type):
+        self.send_response(response_code)
+        self.send_header("Content-Type", content_type)
+        for header in self.extra_headers:
+            self.send_header(header[0], header[1])
+        self.end_headers()
+        self.wfile.write(bytes(data, "utf8"))
+
+    def send_api_error(self, message, response_code=400):
+        self.send(response_code, json.dumps({
+            "status": "error",
+            "message": message
+        }), "text/json")
+
+api_server = socketserver.TCPServer(("", PORT), RequestHandler)
+api_server.serve_forever()

@@ -51,10 +51,25 @@ if firefox_running; then
     kill_firefox
 fi
 
+# Set or reset the user agent
+if [ -f "/config/profile/user-agent" ]; then
+    cat /config/profile/user.js | grep -v "useragent.override" > /tmp/user.js
+    cat /tmp/user.js > /config/profile/user.js
+    rm /tmp/user.js
+    ua=$(cat "/config/profile/user-agent")
+    if [ ! -z "$ua" ]; then
+        echo "user_pref('general.useragent.override', '$ua');" > /config/profile/user.js
+    else
+        cat /config/profile/prefs.js | grep -v "useragent.override" > /tmp/prefs.js
+        cat /tmp/prefs.js > /config/profile/prefs.js
+        rm /tmp/prefs.js
+    fi
+fi
+
 # Start Firefox in background.
 /usr/bin/firefox "$@" &
 firefox --version > /tmp/firefox_version
-echo "" > /opt/novnc/messages
+touch /tmp/clear_ui_messages
 
 # And wait for its termination.
 FF_PID=$!
